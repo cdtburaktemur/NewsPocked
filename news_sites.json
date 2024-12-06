@@ -1,0 +1,16 @@
+{
+    "hurriyet.com.tr": {
+        "url": "https://www.hurriyet.com.tr/gundem/",
+        "title_selector": ".category__list__item h2",
+        "image_selector": ".category__list__item--cover img",
+        "link_selector": ".category__list__item a[data-tag=\"h2\"]",
+        "card_selector": ".category__list__item"
+    },
+    "sozcu.com.tr": {
+        "url": "https://www.sozcu.com.tr/kategori/gundem/",
+        "title_selector": ".d-block.fs-5.fw-semibold",
+        "image_selector": "img[loading=\"lazy\"]",
+        "link_selector": ".col-md-6.col-lg-4.mb-4 > a",
+        "card_selector": ".col-md-6.col-lg-4.mb-4"
+    }
+}

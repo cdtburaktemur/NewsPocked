@@ -6,33 +6,26 @@ import tweepy
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+from urllib.parse import urljoin
 
 class NewsPocked:
     def __init__(self):
         # .env dosyasından Twitter API kimlik bilgilerini yükle
         load_dotenv()
         
-        # Twitter API kimlik bilgileri (OAuth 1.0a için)
-        self.api_key = os.getenv('TWITTER_CLIENT_ID')  # API Key olarak Client ID'yi kullan
-        self.api_secret = os.getenv('TWITTER_CLIENT_SECRET')  # API Secret olarak Client Secret'ı kullan
+        # Twitter API kimlik bilgileri
+        self.api_key = os.getenv('TWITTER_CLIENT_ID')
+        self.api_secret = os.getenv('TWITTER_CLIENT_SECRET')
         self.access_token = os.getenv('TWITTER_ACCESS_TOKEN')
         self.access_token_secret = os.getenv('TWITTER_ACCESS_TOKEN_SECRET')
         
         # Twitter API client'ını başlat
         self.twitter_client = self._init_twitter()
         
-        # Takip edilecek haber siteleri ve seçicileri
-        self.news_sites = {
-            'hurriyet.com.tr': {
-                'url': 'https://www.hurriyet.com.tr/gundem/',
-                'title_selector': '.category__list__item h2',
-                'image_selector': '.category__list__item--cover img',
-                'link_selector': '.category__list__item a[data-tag="h2"]'
-            }
-            # Diğer haber siteleri buraya eklenebilir
-        }
+        # Haber sitelerini yükle
+        self.news_sites = self._load_news_sites()
         
-        # Paylaşılan haberleri takip etmek için
+        # Paylaşılan haberleri yükle
         self.posted_news = self._load_posted_news()
 
     def _init_twitter(self):
@@ -79,11 +72,61 @@ class NewsPocked:
         with open('posted_news.json', 'w') as f:
             json.dump(self.posted_news, f)
 
+    def _load_news_sites(self):
+        """Kayıtlı haber sitelerini yükler"""
+        try:
+            with open('news_sites.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            # Varsayılan siteleri döndür
+            default_sites = {
+                'hurriyet.com.tr': {
+                    'url': 'https://www.hurriyet.com.tr/gundem/',
+                    'title_selector': '.category__list__item h2',
+                    'image_selector': '.category__list__item--cover img',
+                    'link_selector': '.category__list__item a[data-tag="h2"]',
+                    'card_selector': '.category__list__item'
+                },
+                'sozcu.com.tr': {
+                    'url': 'https://www.sozcu.com.tr/kategori/gundem/',
+                    'title_selector': '.d-block.fs-5.fw-semibold',
+                    'image_selector': 'img[loading="lazy"]',
+                    'link_selector': '.col-md-6.col-lg-4.mb-4 > a',
+                    'card_selector': '.col-md-6.col-lg-4.mb-4'
+                }
+            }
+            # Varsayılan siteleri kaydet
+            self._save_news_sites(default_sites)
+            return default_sites
+
+    def _save_news_sites(self, sites=None):
+        """Haber sitelerini kaydeder"""
+        if sites is None:
+            sites = self.news_sites
+        with open('news_sites.json', 'w', encoding='utf-8') as f:
+            json.dump(sites, f, ensure_ascii=False, indent=4)
+
+    def add_news_site(self, name, url, selectors):
+        """Yeni haber sitesi ekler"""
+        self.news_sites[name] = {
+            'url': url,
+            'title_selector': selectors['title_selector'],
+            'image_selector': selectors['image_selector'],
+            'link_selector': selectors['link_selector'],
+            'card_selector': selectors['card_selector']
+        }
+        self._save_news_sites()
+
+    def remove_news_site(self, name):
+        """Haber sitesini kaldırır"""
+        if name in self.news_sites:
+            del self.news_sites[name]
+            self._save_news_sites()
+
     def scrape_news(self, site_url, selectors):
-        """Haber sitesinden haberleri çeker"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'tr,en-US;q=0.7,en;q=0.3',
             }
@@ -91,27 +134,25 @@ class NewsPocked:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             news_items = []
-            # Doğru class adıyla haber kartlarını bul
-            news_cards = soup.select('.category__list__item')
+            
+            # Haber kartlarını seç
+            news_cards = soup.select(selectors['card_selector'])
             print(f"Bulunan haber kartı sayısı: {len(news_cards)}")
             
             for card in news_cards:
                 try:
-                    title_elem = card.select_one('h2')
-                    image_elem = card.select_one('.category__list__item--cover img')
-                    link_elem = card.select_one('a[data-tag="h2"]')
+                    title_elem = card.select_one(selectors['title_selector'])
+                    image_elem = card.select_one(selectors['image_selector'])
+                    link_elem = card.select_one(selectors['link_selector'])
                     
                     if title_elem and image_elem and link_elem:
                         title = title_elem.text.strip()
-                        image_src = image_elem.get('data-src') or image_elem.get('src')
+                        image_src = image_elem.get('src') or image_elem.get('data-src')
                         link_href = link_elem.get('href')
                         
-                        print(f"Başlık: {title}")
-                        print(f"Görsel: {image_src}")
-                        print(f"Link: {link_href}")
-                        
-                        if link_href and not link_href.startswith('http'):
-                            link_href = 'https://www.hurriyet.com.tr' + link_href
+                        # Link'i tam URL'ye çevir
+                        if not link_href.startswith('http'):
+                            link_href = urljoin(site_url, link_href)
                         
                         if title and image_src and link_href:
                             news_items.append({
@@ -134,8 +175,7 @@ class NewsPocked:
         try:
             # Twitter client'ı kontrol et
             if not self.twitter_client:
-                print("Twitter client başlatılamadı!")
-                return False
+                raise Exception("Twitter client başlatılamadı!")
             
             # Haber daha önce paylaşılmış mı kontrol et
             if news['link'] in self.posted_news:
@@ -146,13 +186,13 @@ class NewsPocked:
             with open('temp_image.jpg', 'wb') as f:
                 f.write(image_response.content)
             
-            # Tweet metni oluştur (280 karakter sınırı)
-            title = news['title'][:200] if len(news['title']) > 200 else news['title']
-            tweet_text = f"{title}\n\n{news['link']}"
-            
             try:
                 # Görseli yükle (v1.1 API ile)
                 media = self.api_v1.media_upload('temp_image.jpg')
+                
+                # Tweet metni oluştur (280 karakter sınırı)
+                title = news['title'][:200] if len(news['title']) > 200 else news['title']
+                tweet_text = f"{title}\n\n{news['link']}"
                 
                 # Tweet'i paylaş (v2 API ile)
                 self.twitter_client.create_tweet(
@@ -164,20 +204,26 @@ class NewsPocked:
                 self.posted_news.append(news['link'])
                 self._save_posted_news()
                 
-                print(f"Tweet başarıyla paylaşıldı: {title}")
                 return True
                 
+            except tweepy.errors.TooManyRequests as e:
+                # Rate limit hatasını özel bir formatta ilet
+                reset_time = int(e.response.headers.get('x-rate-limit-reset', 0))
+                current_time = int(time.time())
+                sleep_time = reset_time - current_time
+                raise Exception(f"Rate limit exceeded. Sleeping for {sleep_time} seconds.")
+                
             except Exception as e:
-                print(f"Tweet paylaşılırken hata: {str(e)}")
-                return False
+                raise Exception(f"Tweet paylaşılırken hata: {str(e)}")
+                
             finally:
                 # Geçici görseli sil
                 if os.path.exists('temp_image.jpg'):
                     os.remove('temp_image.jpg')
-            
+                
         except Exception as e:
-            print(f"Hata: Tweet paylaşılırken bir sorun oluştu: {str(e)}")
-            return False
+            # Tüm hataları yukarı ilet
+            raise e
 
     def run(self):
         """Ana program döngüsü"""
